@@ -243,10 +243,9 @@ weather-risk-agent/
 │   └── simulate_alert.py   # bonus: a SIMULATED alert on a copy of the database
 ├── web/
 │   └── index.html
-├── evals/
-│   ├── cases.json
-│   └── run.py
-└── ai-sessions/         # exported AI agent sessions (deliverable)
+└── evals/
+    ├── cases.json
+    └── run.py
 ```
 
 ## 13. Build phases & gates
@@ -424,7 +423,7 @@ weather-risk-agent/
 ### Phase 8: Submit
 
 **Steps**
-1. **[Coral]** Export the AI sessions she's submitting (the planning chat and the Claude Code build sessions) into `ai-sessions/`.
+1. **[Coral]** Export the AI sessions she's submitting (the planning chats and the Claude Code build sessions). They are sent by email as a ZIP, not committed to the repo.
 2. **[CC]** Clean-run test: clone the repo into a new temporary folder, copy in the existing `.env`, and follow only the README, command by command. Report every step that didn't work as written.
 3. **[CC]** Fix what the clean run found, with Coral's approval.
 4. **[Coral]** Make the final commit and submit.

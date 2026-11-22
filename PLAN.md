@@ -63,8 +63,10 @@ Covers every city in the assignment's example questions, plus 5 Midwest hubs so 
 | Source | What we use | Access |
 |---|---|---|
 | Open-Meteo Historical Weather API (`archive-api.open-meteo.com/v1/archive`) | Daily `snowfall_sum`, `precipitation_sum`, `temperature_2m_max`, `temperature_2m_min`, `wind_gusts_10m_max` | Free, no key |
-| FEMA National Risk Index (NRI), county level | Per-hazard fields for hurricane (HRCN), strong wind (SWND), riverine flooding (RFLD), coastal flooding (CFLD), winter weather (WNTW), ice storm (ISTM), cold wave (CWAV), tornado (TRND), hail (HAIL), heat wave (HWAV) | Query an official, current ArcGIS feature service by county FIPS if one is reachable; otherwise use FEMA's official county-level CSV download. Decided at Gate 1. |
+| FEMA National Risk Index (NRI), county level, version "December 2025" | Per-hazard fields for hurricane (HRCN), strong wind (SWND), inland flooding (IFLD), coastal flooding (CFLD), winter weather (WNTW), ice storm (ISTM), cold wave (CWAV), tornado (TRND), hail (HAIL), heat wave (HWAV) | FEMA's ArcGIS feature layer `National_Risk_Index_Counties` (layer 0), queried by `STCOFIPS`: `https://services.arcgis.com/XG15cJAlne2vxtgt/ArcGIS/rest/services/National_Risk_Index_Counties/FeatureServer/0/query`. Free, no key. |
 | NWS API (`api.weather.gov/alerts/active`) | Active alerts at each hub's point. Bonus only (§11). | Free; requires a `User-Agent` header |
+
+**NRI status.** In December 2025 FEMA retired the standalone NRI website and its downloads, and moved NRI data into its Resilience Analysis and Planning Tool (RAPT). The December 2025 release is the latest, and DHS has told GAO there will be no ongoing updates. That release replaced riverine flooding (RFLD) with inland flooding (IFLD). The same ArcGIS org also hosts older NRI layers (names ending in `(March_2023)` or `v117`); don't use them.
 
 All responses are cached in SQLite (§9), so after one refresh the app runs without calling external APIs. This matters for the live demo.
 
@@ -76,7 +78,7 @@ Five hazard categories, each scored 0–100 per hub:
 |---|---|---|
 | winter | WNTW, ISTM, CWAV | snow days (≥ 1 cm); severe-cold days (Tmin ≤ −18 °C / 0 °F) |
 | hurricane_wind | HRCN, SWND | high-wind days (gusts ≥ 93 km/h / 58 mph, the NWS severe-wind threshold) |
-| flood | RFLD, CFLD | heavy-rain days (≥ 50 mm) |
+| flood | IFLD, CFLD | heavy-rain days (≥ 50 mm) |
 | severe_storm | TRND, HAIL | none (NRI only) |
 | heat | HWAV | extreme-heat days (Tmax ≥ 38 °C / 100 °F) |
 
@@ -265,14 +267,14 @@ weather-risk-agent/
 1. **[CC]** Create `data/hubs.json` from the §4 table, with every column.
 2. **[CC]** Create `app/db.py`. The SQLite file is `data/cache.db`, with both tables from §9. `score_snapshots` stays empty until Phase 2.
 3. **[CC]** Create `app/sources/open_meteo.py`: for each hub, the daily variables in §5 from 2021-01-01 to 2025-12-31, with `timezone=auto` so days follow local time. Metric units (Open-Meteo's default).
-4. **[CC]** Create `app/sources/fema_nri.py`. First check whether an official, current ArcGIS feature service for county-level NRI is reachable; if not, use FEMA's official county-level CSV. Fetch the §5 hazards for the 14 FIPS codes, for all three candidate field types (`*_RISKS`, `*_AFREQ`, `*_EALS`), so Gate 1 can compare them. Store only the 14 counties' rows.
+4. **[CC]** Create `app/sources/fema_nri.py`. Query the §5 ArcGIS layer by `STCOFIPS` and confirm `NRI_VER` is "December 2025". Fetch the §5 hazards for the 14 FIPS codes, for all three candidate field types (`*_RISKS`, `*_AFREQ`, `*_EALS`), so Gate 1 can compare them. Store only the 14 counties' rows.
 5. **[CC]** Create `app/refresh.py`. `python -m app.refresh` calls the two clients and writes every response to `api_cache`. Refresh always fetches fresh data; everything else in the app reads only from the cache.
 6. **[CC]** Run the refresh.
 
 **Gate 1: Claude Code shows**
 - For Denver and Miami: a sample of raw daily Open-Meteo values, and the NRI values for all three field types.
 - A table of all 14 hubs: FIPS code → the county name NRI returned.
-- Which NRI access method was used (ArcGIS or CSV), and the NRI data version.
+- The `NRI_VER` value returned (expected: "December 2025").
 - Denver 2025: days with snowfall ≥ 0.25 cm, days with ≥ 1 cm, and days above 0 but below 0.25 cm.
 - A proposal for the NRI field type: the three types side by side for a few hazards, the scale of each, and a recommendation with its reason.
 
@@ -363,7 +365,7 @@ weather-risk-agent/
 1. **[CC]** Write `README.md`:
    - What the agent does, in a few lines.
    - Setup from a fresh clone, as exact commands: create the venv, install, `cp .env.example .env` and fill it in, run `python -m app.refresh` (required, because the cache isn't in git), start the server, run the evals.
-   - Assumptions (§3), thresholds and weights (from `config.py`), out of scope (§2), and limitations (data resolution, in-memory sessions).
+   - Assumptions (§3), thresholds and weights (from `config.py`), out of scope (§2), and limitations (data resolution, NRI's final December 2025 release, in-memory sessions).
 2. **[CC]** Write `DESIGN.md`: architecture, repo structure, scoring model, storage choice (§9), and why there's no agent framework (§7).
 
 **Gate 6: Coral checks**
@@ -404,7 +406,7 @@ weather-risk-agent/
 
 | Risk | Mitigation |
 |---|---|
-| NRI access endpoint unclear or unstable | Decided at Gate 1, with the official CSV as fallback; cached either way |
+| NRI is no longer updated, and its old website and downloads are gone | Use FEMA's ArcGIS layer (December 2025, the latest release), cache it after the first refresh, and state the version in the README |
 | An external API is down during the live demo | Everything is served from the SQLite cache after one refresh |
 | The LLM states numbers that didn't come from tools | System-prompt rule, plus an eval check that every key figure appears in a tool output |
 | Running out of time | Phases are ordered by value, the bonus comes last, and the scope is narrow |

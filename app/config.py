@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 HUBS_PATH = ROOT / "data" / "hubs.json"
 DB_PATH = ROOT / "data" / "cache.db"
+WEB_PAGE_PATH = ROOT / "web" / "index.html"
 
 # --- Observation window (§3) -------------------------------------------------
 # Weather metrics in the score are yearly averages over these full calendar years.

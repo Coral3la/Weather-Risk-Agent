@@ -150,6 +150,7 @@ FastAPI endpoints:
 - `POST /scores/refresh`: bonus (§11)
 
 UI: one static page (`web/index.html`, plain HTML + JS) served by FastAPI. It talks only to `/chat`. It shows the answer plus a collapsible "How I got this" panel with the tools used, assumptions and confidence. One command runs everything.
+- Decided at Gate 4: the page also has four example-question buttons, a "New conversation" button, a key-figures table and any rejected attempts inside the panel, an "Out of scope" badge, and the model's `**bold**` markers rendered as bold.
 
 ## 9. Storage: SQLite
 

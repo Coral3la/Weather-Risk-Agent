@@ -14,7 +14,11 @@ from pydantic import ValidationError
 
 from app import config, db, scoring
 from app.schemas import (
-    CompareHubsArgs, ExplainHubScoreArgs, ListHubsArgs, RankHubsArgs, WeatherStatArgs,
+    CompareHubsArgs,
+    ExplainHubScoreArgs,
+    ListHubsArgs,
+    RankHubsArgs,
+    WeatherStatArgs,
 )
 
 
@@ -135,17 +139,17 @@ TOOLS = {
     "list_hubs": (ListHubsArgs, list_hubs,
         "List the hubs and regions we cover. Use it to check whether a city is one of our hubs."),
     "rank_hubs": (RankHubsArgs, rank_hubs,
-        "Rank hubs by exposure score, highest first, for one hazard category or overall, "
-        "optionally within one region."),
+        ("Rank hubs by exposure score, highest first, for one hazard category or overall, "
+        "optionally within one region.")),
     "compare_hubs": (CompareHubsArgs, compare_hubs,
-        "Compare two or more hubs side by side: overall score and category scores, "
-        "each with its breakdown (NRI hazards and weather metrics)."),
+        ("Compare two or more hubs side by side: overall score and category scores, "
+        "each with its breakdown (NRI hazards and weather metrics).")),
     "explain_hub_score": (ExplainHubScoreArgs, explain_hub_score,
-        "Full breakdown of one hub's score (inputs, parts, categories, overall), its rank "
-        "among all hubs, and its categories ordered by contribution. Use it for 'why' questions."),
+        ("Full breakdown of one hub's score (inputs, parts, categories, overall), its rank "
+        "among all hubs, and its categories ordered by contribution. Use it for 'why' questions.")),
     "weather_stat": (WeatherStatArgs, weather_stat,
-        "Count the days in one year at one hub that pass a weather threshold, as a number of "
-        f"days and a percentage of the year. Metrics: {_METRICS}."),
+        ("Count the days in one year at one hub that pass a weather threshold, as a number of "
+        f"days and a percentage of the year. Metrics: {_METRICS}.")),
 }
 
 # The tool list sent to the LLM. The SDK turns each Pydantic model into a strict JSON schema.

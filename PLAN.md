@@ -77,23 +77,25 @@ Five hazard categories, each scored 0–100 per hub:
 | Category | NRI hazards | Open-Meteo metrics (yearly avg, 2021–2025) |
 |---|---|---|
 | winter | WNTW, ISTM, CWAV | snow days (≥ 1 cm); severe-cold days (Tmin ≤ −18 °C / 0 °F) |
-| hurricane_wind | HRCN, SWND | high-wind days (gusts ≥ 93 km/h / 58 mph, the NWS severe-wind threshold) |
+| hurricane | HRCN | none (NRI only) |
 | flood | IFLD, CFLD | heavy-rain days (≥ 50 mm) |
-| severe_storm | TRND, HAIL | none (NRI only) |
+| severe_storm | TRND, HAIL, SWND | none (NRI only) |
 | heat | HWAV | extreme-heat days (Tmax ≥ 38 °C / 100 °F) |
 
 How the numbers combine:
 - **NRI part** = mean of the category's NRI hazard values, on a 0–100 scale.
-- **Weather part** = each metric scaled against a fixed cap, `min(value / cap, 1) × 100`, then averaged. Fixed caps (instead of min-max across hubs) keep each hub's score stable when hubs are added, and make it explainable ("31 snow days/yr against a cap of 60 → 52"). Cap values are set in config and reviewed at Gate 2.
+- **Weather part** = each metric scaled against a fixed cap, `min(value / cap, 1) × 100`, then averaged. Fixed caps (instead of min-max across hubs) keep each hub's score stable when hubs are added, and make it explainable ("Denver: 22.4 snow days/yr against a cap of 30 → 74.7"). Cap values are set in config and reviewed at Gate 2.
 - **Category score** = 0.5 × NRI part + 0.5 × weather part. Where a category has no weather metric, it's 100% NRI.
 - **Overall score** = weighted mean of the category scores. Default: equal weights, configurable.
 - Every score comes back with its full breakdown (inputs → parts → category → overall). The agent uses this breakdown to answer "why" questions.
+
+**Why there is no wind-gust metric (decided at Gate 2).** The original plan had a `hurricane_wind` category with a high-wind-days metric (gusts ≥ 93 km/h / 58 mph). It was dropped because gridded reanalysis smooths peak gusts: no hub averages more than 1 day/yr at ≥ 93 km/h. The category was split by meaning instead: `hurricane` is NRI HRCN only, and NRI strong wind (SWND) moved into `severe_storm`.
 
 **Why snow days in the score use ≥ 1 cm, not the 0.25 cm "day with snowfall" threshold (§3).** The two answer different questions. The snowfall-% question asks whether it snowed at all. The score asks how often snow disrupts hub operations, and a thin layer that melts doesn't. 1 cm is our judgment call, not an official standard. Models may also produce many days with tiny snowfall amounts, which a higher threshold filters out; Gate 1 checks this on Denver's data before we rely on it.
 
 **NRI field: annualized frequency (`*_AFREQ`), decided at Gate 1.** It measures how often each hazard occurs in the county, which is the closest NRI measure to "how often could this hub be disrupted". The alternatives mix in things that don't describe a hub's exposure: `*_RISKS` adds the county's social vulnerability and community resilience, and `*_EALS` depends on the value of the county's buildings, population and agriculture. Trade-offs we accept:
 - AFREQ counts how often a hazard happens, not how severe it is.
-- Units and ranges differ by hazard (across our 14 hubs, winter weather reaches ~17 per year while hurricane peaks at 0.3), so each hazard gets its own fixed cap, like the weather metrics. Caps are proposed and reviewed at Gate 2.
+- Units and ranges differ by hazard (across our 14 hubs, winter weather reaches ~17 per year while hurricane peaks at 0.3), so each hazard gets its own fixed cap, like the weather metrics. The rule, approved at Gate 2: a hazard's cap is the 99th percentile of its AFREQ across all US counties in the December 2025 NRI release, rounded, so a county in the national top 1% scores 100. The query and the p99 values are recorded in `app/config.py`.
 - Some AFREQ values are null. For our hubs these are hazards that don't plausibly occur there: coastal flooding in inland counties, hurricanes in Denver and Minneapolis, ice storms in Phoenix, Los Angeles and Miami. A null counts as 0, and the breakdown marks it as "no NRI record".
 - NRI values cover the whole county, not the hub's point (e.g. Los Angeles County includes mountain areas with winter weather). The point-level Open-Meteo half of each category score partly offsets this.
 
@@ -307,7 +309,7 @@ weather-risk-agent/
 - The proposed cap values with their reasons.
 
 **Gate 2: Coral checks**
-- The ranking makes sense (e.g. Miami high on hurricane_wind, Minneapolis high on winter, Phoenix high on heat and low on winter).
+- The ranking makes sense (e.g. Miami high on hurricane, Minneapolis high on winter, Phoenix high on heat and low on winter).
 - Dallas's breakdown adds up.
 - Approve or change the caps.
 

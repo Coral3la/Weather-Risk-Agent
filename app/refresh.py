@@ -1,4 +1,4 @@
-"""Fetch all external data into the SQLite cache.
+"""Fetch all external data into the SQLite cache, then compute and store the scores.
 
 Run: python -m app.refresh
 
@@ -6,21 +6,14 @@ This is the only code that calls external APIs. It always fetches fresh data;
 everything else in the app reads from the cache.
 """
 
-import json
-from pathlib import Path
+from datetime import datetime, timezone
 
-from app import db
+from app import db, scoring
 from app.sources import fema_nri, open_meteo
-
-HUBS_PATH = Path(__file__).resolve().parent.parent / "data" / "hubs.json"
-
-
-def load_hubs() -> list[dict]:
-    return json.loads(HUBS_PATH.read_text())
 
 
 def refresh() -> None:
-    hubs = load_hubs()
+    hubs = scoring.load_hubs()
 
     # Fetch everything first, so a failed request leaves the existing cache untouched.
     responses = []  # (source, cache_key, payload)
@@ -33,8 +26,16 @@ def refresh() -> None:
     with conn:  # one transaction
         for source, cache_key, payload in responses:
             db.save_response(conn, source, cache_key, payload)
-    conn.close()
     print(f"Cached {len(responses)} responses for {len(hubs)} hubs in {db.DB_PATH}")
+
+    # Compute the scores from the fresh cache and add one snapshot row per hub.
+    computed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    breakdowns = scoring.score_all(conn)
+    with conn:
+        for breakdown in breakdowns:
+            db.save_snapshot(conn, breakdown["hub_id"], computed_at, breakdown)
+    conn.close()
+    print(f"Stored {len(breakdowns)} score snapshots (computed at {computed_at})")
 
 
 if __name__ == "__main__":

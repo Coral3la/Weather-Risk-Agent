@@ -8,10 +8,12 @@ import time
 
 import requests
 
+from app import config
+
 SOURCE = "open_meteo"
 URL = "https://archive-api.open-meteo.com/v1/archive"
-START_DATE = "2021-01-01"
-END_DATE = "2025-12-31"
+START_DATE = f"{config.FIRST_YEAR}-01-01"
+END_DATE = f"{config.LAST_YEAR}-12-31"
 DAILY_VARIABLES = [
     "snowfall_sum",          # cm
     "precipitation_sum",     # mm

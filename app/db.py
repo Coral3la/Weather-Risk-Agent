@@ -3,9 +3,8 @@
 import json
 import sqlite3
 from datetime import datetime, timezone
-from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "cache.db"
+from app.config import DB_PATH
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS api_cache (
@@ -56,3 +55,12 @@ def load_response(conn: sqlite3.Connection, source: str, cache_key: str) -> dict
             f"No cached {source} data for '{cache_key}'. Run: python -m app.refresh"
         )
     return json.loads(row[0])
+
+
+def save_snapshot(conn: sqlite3.Connection, hub_id: str, computed_at: str, breakdown: dict) -> None:
+    """Append one hub's score to the history. Does not commit."""
+    conn.execute(
+        "INSERT INTO score_snapshots (hub_id, computed_at, overall, breakdown_json) "
+        "VALUES (?, ?, ?, ?)",
+        (hub_id, computed_at, breakdown["overall"], json.dumps(breakdown)),
+    )

@@ -64,8 +64,8 @@ region, hubs or year from earlier in the conversation.
 Definitions
 - "Last year" means {config.LAST_YEAR}.
 - Regions are US Census regions: {", ".join(config.REGIONS)}.
-- "Day with snowfall" is the snowfall_days metric (>= 0.25 cm). When asked about snowfall \
-days, also call weather_stat with snow_days (>= 1 cm) and report it for context.
+- For any question about snow or snowfall days, call weather_stat with both snowfall_days \
+(>= 0.25 cm) and snow_days (>= 1 cm), and report both with their definitions.
 - Weather data is gridded reanalysis, not station observations, so counts can differ from \
 local station records. NRI data is county-level.
 

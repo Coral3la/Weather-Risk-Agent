@@ -1,0 +1,94 @@
+[
+  {
+    "id": 1,
+    "name": "Midwest winter ranking",
+    "turns": ["Which hubs in the Midwest are most exposed to winter disruption?"],
+    "checks": [
+      {"type": "tool_called", "tool": "rank_hubs", "arguments": {"category": "winter", "region": "Midwest"}},
+      {"type": "top_hubs_match_engine", "category": "winter", "region": "Midwest", "top_n": 1}
+    ]
+  },
+  {
+    "id": 2,
+    "name": "Miami vs Houston on hurricane + flood",
+    "turns": ["Compare Miami and Houston in terms of hurricane and flood exposure."],
+    "checks": [
+      {"type": "tool_called", "tool": "compare_hubs", "arguments": {"hub_ids": ["miami", "houston"]},
+       "arguments_if_given": {"categories": ["hurricane", "flood"]}}
+    ]
+  },
+  {
+    "id": 3,
+    "name": "Denver snowfall % last year",
+    "turns": ["What percentage of days in Denver last year had snowfall?"],
+    "checks": [
+      {"type": "figure_matches_tool", "tool": "weather_stat",
+       "arguments": {"hub_id": "denver", "metric": "snowfall_days", "year": 2025},
+       "field": "percent_of_days"}
+    ]
+  },
+  {
+    "id": 4,
+    "name": "Why is Dallas's risk high?",
+    "turns": ["Why is the Dallas hub's weather disruption risk high?"],
+    "checks": [
+      {"type": "tool_called", "tool": "explain_hub_score", "arguments": {"hub_id": "dallas"}},
+      {"type": "names_top_category", "hub_id": "dallas"}
+    ]
+  },
+  {
+    "id": 5,
+    "name": "Follow-up: Midwest winter, then flooding",
+    "turns": ["Rank Midwest hubs for winter", "And for flooding?"],
+    "checks": [
+      {"type": "tool_called", "tool": "rank_hubs", "arguments": {"category": "flood", "region": "Midwest"}}
+    ]
+  },
+  {
+    "id": 6,
+    "name": "Unknown hub (Boston)",
+    "turns": ["How exposed is our Boston hub to winter storms?"],
+    "checks": [
+      {"type": "out_of_scope"},
+      {"type": "no_hub_scores"}
+    ]
+  },
+  {
+    "id": 7,
+    "name": "False premise (Phoenix winter risk)",
+    "turns": ["Why is Phoenix's winter risk so high?"],
+    "checks": [
+      {"type": "contradicts_premise", "hub_id": "phoenix", "category": "winter",
+       "phrases": ["not high", "isn't high", "is not high", "low", "lowest", "does not hold", "doesn't hold", "contradict"]}
+    ]
+  },
+  {
+    "id": 8,
+    "name": "Top 3 hubs overall for investment",
+    "turns": ["Which 3 hubs should we prioritize overall for resilience investment?"],
+    "checks": [
+      {"type": "top_hubs_match_engine", "category": "overall", "region": null, "top_n": 3}
+    ]
+  },
+  {
+    "id": 9,
+    "name": "Forecast question",
+    "turns": ["Will it snow in Chicago next week?"],
+    "checks": [
+      {"type": "out_of_scope"}
+    ]
+  },
+  {
+    "id": 10,
+    "name": "Chicago snow days in 2024",
+    "turns": ["How many snow days did Chicago have in 2024?"],
+    "checks": [
+      {"type": "figure_matches_tool", "tool": "weather_stat",
+       "arguments": {"hub_id": "chicago", "metric": "snow_days", "year": 2024},
+       "field": "days"},
+      {"type": "figure_matches_tool", "tool": "weather_stat",
+       "arguments": {"hub_id": "chicago", "metric": "snowfall_days", "year": 2024},
+       "field": "days"}
+    ]
+  }
+]

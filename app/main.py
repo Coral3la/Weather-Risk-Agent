@@ -41,21 +41,30 @@ def _short_result(tool: str, result: dict) -> str:
     if tool == "list_hubs":
         return f"{result['hub_count']} hubs (region: {result['region']})"
     if tool == "rank_hubs":
-        ranking = ", ".join(f"{row['rank']}. {row['city']} {row['score']}" for row in result["ranking"])
+        ranking = ", ".join(
+            f"{row['rank']}. {row['city']} {row['score']}" for row in result["ranking"]
+        )
         return f"{result['category']} scores, region {result['region']}: {ranking}"
     if tool == "compare_hubs":
         hubs = "; ".join(
-            f"{hub['city']}: " + ", ".join(f"{name} {category['score']}"
-                                           for name, category in hub["categories"].items())
+            f"{hub['city']}: "
+            + ", ".join(
+                f"{name} {category['score']}"
+                for name, category in hub["categories"].items()
+            )
             for hub in result["hubs"]
         )
         return f"category scores: {hubs}"
     if tool == "explain_hub_score":
-        return (f"{result['city']}: overall score {result['overall']}, "
-                f"rank {result['overall_rank']} of {result['ranked_among_hubs']}")
+        return (
+            f"{result['city']}: overall score {result['overall']}, "
+            f"rank {result['overall_rank']} of {result['ranked_among_hubs']}"
+        )
     if tool == "weather_stat":
-        return (f"{result['hub_id']} {result['year']}, {result['definition']}: "
-                f"{result['days']} of {result['days_with_data']} days ({result['percent_of_days']}%)")
+        return (
+            f"{result['hub_id']} {result['year']}, {result['definition']}: "
+            f"{result['days']} of {result['days_with_data']} days ({result['percent_of_days']}%)"
+        )
     return ""
 
 
@@ -83,9 +92,11 @@ def chat(request: ChatRequest) -> dict:
     """
     turn = agent.run_turn(request.message, request.session_id)
     turn["trace"] = [
-        {"tool": step["tool"],
-         "arguments": json.loads(step["arguments"]),
-         "result": _short_result(step["tool"], step["result"])}
+        {
+            "tool": step["tool"],
+            "arguments": json.loads(step["arguments"]),
+            "result": _short_result(step["tool"], step["result"]),
+        }
         for step in turn["trace"]
     ]
     return turn
@@ -97,9 +108,14 @@ def hubs() -> dict:
 
 
 @app.get("/scores")
-def scores(category: CategoryOrOverall = config.OVERALL, region: Region | None = None) -> dict:
+def scores(
+    category: CategoryOrOverall = config.OVERALL,  # pyright: ignore[reportInvalidTypeForm]
+    region: Region | None = None,  # pyright: ignore[reportInvalidTypeForm]
+) -> dict:
     """Hubs ranked by score, highest first. An unknown category or region is a 422."""
-    return _run_tool(tools.rank_hubs, RankHubsArgs(category=category, region=region, top_n=None))
+    return _run_tool(
+        tools.rank_hubs, RankHubsArgs(category=category, region=region, top_n=None)
+    )
 
 
 @app.get("/health")
@@ -107,7 +123,9 @@ def health() -> dict:
     """`scores_computed_at` is the time of the last refresh, or null if it never ran."""
     conn = db.connect()
     try:
-        last_refresh = conn.execute("SELECT MAX(computed_at) FROM score_snapshots").fetchone()[0]
+        last_refresh = conn.execute(
+            "SELECT MAX(computed_at) FROM score_snapshots"
+        ).fetchone()[0]
     finally:
         conn.close()
     return {"status": "ok", "scores_computed_at": last_refresh}

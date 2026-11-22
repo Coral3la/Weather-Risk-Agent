@@ -7,8 +7,6 @@ Each tool has:
 The LLM never computes anything: every number it reports comes from these dicts.
 """
 
-import json
-
 import openai
 from pydantic import ValidationError
 

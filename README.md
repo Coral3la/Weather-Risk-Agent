@@ -11,6 +11,42 @@ Data: Open-Meteo daily weather history (2021–2025) and the FEMA National Risk 
 
 The design is explained in [DESIGN.md](DESIGN.md). The build plan and its decisions are in [PLAN.md](PLAN.md).
 
+## How it works
+
+Two separate paths: refresh fetches the data into a SQLite cache, and chat answers questions from that cache.
+
+```mermaid
+flowchart TB
+    subgraph chat["Chat (online)"]
+        browser["Browser (web/index.html)"]
+        api["FastAPI (app/main.py)"]
+        agent["Agent loop (app/agent.py)"]
+        openai["OpenAI API<br/>(picks tools, writes the answer)"]
+        tools["Tools (app/tools.py)<br/>arguments validated by Pydantic (app/schemas.py)"]
+        scoring["Scoring engine (app/scoring.py)<br/>thresholds, caps, weights: app/config.py"]
+
+        browser -->|"POST /chat {message, session_id}"| api
+        api --> agent
+        agent <--> openai
+        agent -->|"tool name + arguments"| tools
+        tools --> scoring
+    end
+
+    cache[("SQLite cache (data/cache.db)")]
+
+    subgraph refresh["Refresh (offline)"]
+        refresh_cmd["python -m app.refresh"]
+        sources["Open-Meteo, FEMA NRI<br/>(the only external data calls)"]
+
+        refresh_cmd --> sources
+    end
+
+    scoring -->|"reads only"| cache
+    refresh_cmd -->|"writes"| cache
+```
+
+Each part is explained in [DESIGN.md](DESIGN.md#architecture).
+
 ## Setup
 
 You need Python 3 (built and run on 3.14; older versions are untested) and an OpenAI API key.

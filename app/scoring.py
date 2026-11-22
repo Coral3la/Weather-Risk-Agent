@@ -121,8 +121,13 @@ def _weather_part(daily: dict, metric_names: list[str]) -> dict:
     return {"score": _round(exact), "metrics": rows, "_exact": exact}
 
 
-def score_hub(conn: sqlite3.Connection, hub: dict) -> dict:
-    """Score one hub. Returns the full breakdown: inputs -> parts -> categories -> overall."""
+def score_hub_exact(conn: sqlite3.Connection, hub: dict) -> tuple[dict, dict]:
+    """Score one hub. Returns (breakdown, exact scores).
+
+    The breakdown holds the rounded numbers that are reported. The exact scores
+    ({category: score, "overall": score}, unrounded) are only for sorting, so
+    two hubs that round to the same score still rank in their true order.
+    """
     daily = db.load_response(conn, OPEN_METEO, hub["id"])["daily"]
     nri = db.load_response(conn, FEMA_NRI, hub["fips"])["features"][0]["attributes"]
 
@@ -152,7 +157,8 @@ def score_hub(conn: sqlite3.Connection, hub: dict) -> dict:
 
     total_weight = sum(config.CATEGORY_WEIGHTS.values())
     overall = sum(exact_scores[name] * config.CATEGORY_WEIGHTS[name] for name in exact_scores) / total_weight
-    return {
+    exact_scores[config.OVERALL] = overall
+    breakdown = {
         "hub_id": hub["id"],
         "city": hub["city"],
         "state": hub["state"],
@@ -163,8 +169,19 @@ def score_hub(conn: sqlite3.Connection, hub: dict) -> dict:
         "nri_county": f"{nri['COUNTY']} {nri['COUNTYTYPE']}, {nri['STATEABBRV']}",
         "nri_version": nri["NRI_VER"],
     }
+    return breakdown, exact_scores
+
+
+def score_hub(conn: sqlite3.Connection, hub: dict) -> dict:
+    """Score one hub. Returns the full breakdown: inputs -> parts -> categories -> overall."""
+    return score_hub_exact(conn, hub)[0]
 
 
 def score_all(conn: sqlite3.Connection) -> list[dict]:
     """Score every hub, in hubs.json order."""
     return [score_hub(conn, hub) for hub in load_hubs()]
+
+
+def score_all_exact(conn: sqlite3.Connection) -> list[tuple[dict, dict]]:
+    """Score every hub, in hubs.json order: (breakdown, exact scores) per hub."""
+    return [score_hub_exact(conn, hub) for hub in load_hubs()]

@@ -114,6 +114,11 @@ How the numbers combine:
 | `explain_hub_score(hub_id)` | Full breakdown of one hub's score |
 | `weather_stat(hub_id, metric, year)` | e.g. % of days with snowfall in a given year |
 
+Decided at Gate 3:
+- `rank_hubs` also accepts `category="overall"`, so "top hubs overall" questions (§10, case 8) use the same tool.
+- Tool results carry extra fields computed in code, so the LLM never compares or derives numbers: `explain_hub_score` adds the hub's rank among all hubs (overall and per category) and its categories ordered by contribution; `compare_hubs` adds `highest_per_category`.
+- Rankings sort on unrounded scores; rounding happens only in tool output. Exact ties keep `hubs.json` order.
+
 **Final answer.** The LLM returns an `AgentAnswer` (a Pydantic model → JSON schema, via OpenAI structured outputs):
 - `answer`: str, the text shown to the user
 - `hubs`: list of `{hub_id, name, score?}`
@@ -123,6 +128,8 @@ How the numbers combine:
 - `out_of_scope`: bool
 
 If parsing or validation fails, the agent retries once. If it fails again, it returns a clear error object, never unvalidated free text.
+
+**Runtime number check (decided at Gate 3).** After the final answer parses, code checks that every `key_figures` value appears in a tool result from the session (`unsupported_key_figures` in `app/agent.py`, reused by the evals). A miss counts as a validation failure: one retry that names the missing values, then the error object. It covers `key_figures` only, not the answer text.
 
 **System-prompt rules**
 - Use only numbers that came from tool results.
@@ -136,6 +143,8 @@ If parsing or validation fails, the agent retries once. If it fails again, it re
 
 FastAPI endpoints:
 - `POST /chat` `{message, session_id?}` → `{session_id, answer: AgentAnswer, trace}`. `trace` lists each tool call with its arguments and a short result.
+  - Decided at Gate 3: the agent's `run_turn` returns `{session_id, answer, error, trace, retries}`. `answer` is null when `error` (`{type, message}`) is set, and `retries` lists why an answer was rejected and asked for again.
+  - Decided at Gate 3: the agent's `trace` holds each tool's full result, so every number can be checked; the API may shorten it for display.
 - `GET /hubs`, `GET /scores?category=&region=`
 - `GET /health`
 - `POST /scores/refresh`: bonus (§11)

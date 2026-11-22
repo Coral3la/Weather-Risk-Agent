@@ -135,3 +135,15 @@ CATEGORY_WEIGHTS = {
 # Scores are rounded to this many decimals when reported. Each step is computed
 # from unrounded values, so re-adding rounded parts by hand can differ by 0.1.
 SCORE_DECIMALS = 1
+
+# --- Agent (§7) ------------------------------------------------------------------
+REGIONS = ["Midwest", "South", "West", "Northeast"]  # US Census regions (§3)
+
+# "overall" can be ranked like a category.
+OVERALL = "overall"
+
+# The LLM may ask for tools at most this many times per question.
+MAX_TOOL_ROUNDS = 5
+
+# If the final answer fails validation, ask the LLM again this many times.
+ANSWER_RETRIES = 1

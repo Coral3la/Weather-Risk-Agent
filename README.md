@@ -2,6 +2,8 @@
 
 A chat agent that helps logistics analysts decide which US distribution hubs are most exposed to severe weather, and so should come first for resilience investment.
 
+**Live demo:** https://weather-risk-agent-h81t.onrender.com/ (the free instance sleeps after 15 minutes without traffic, so the first request can take up to a minute.)
+
 - It covers a fixed list of 14 hubs (`data/hubs.json`).
 - It scores each hub's historical exposure, 0–100, in five hazard categories (winter, hurricane, flood, severe storm, heat) and overall.
 - It answers rankings, comparisons, weather statistics, "why is this hub's score high?" questions and follow-ups.
@@ -206,6 +208,18 @@ CACHE_DB_PATH=data/simulated.db ALERT_CHECK_INTERVAL_MINUTES=0 uvicorn app.main:
 
 The script never writes to the real database, and its alert is only logged, never sent to `ALERT_WEBHOOK_URL`.
 
+## Deployment (Render)
+
+The live demo runs as a Render web service on the free plan, with these settings:
+
+| Setting | Value |
+|---|---|
+| Build command | `pip install -r requirements.txt && python -m app.refresh` |
+| Start command | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
+| Environment variables | `OPENAI_API_KEY`, `OPENAI_MODEL`, `PYTHON_VERSION=3.14.5` |
+
+`ALERT_WEBHOOK_URL` is not set, so alerts are only logged.
+
 ## Out of scope
 
 The agent says so (and sets `out_of_scope`) when asked for any of these:
@@ -214,7 +228,7 @@ The agent says so (and sets `out_of_scope`) when asked for any of these:
 - **Business impact:** hub throughput, revenue, upgrade cost. The agent ranks *exposure*, not return on investment. A real investment priority is exposure × business impact, and we have no data for the second factor.
 - **Hubs or cities outside the list of 14.**
 
-Not built: voice, authentication, multi-user persistence, a public deployment.
+Not built: voice, authentication, multi-user persistence.
 
 ## Limitations
 
@@ -229,6 +243,10 @@ Not built: voice, authentication, multi-user persistence, a public deployment.
 - **Hurricane and severe-storm scores rest on NRI alone,** with no observed-weather half.
 
 - **`current_risk` does not filter by alert type.** Every active NWS alert counts by its severity, so alerts unlikely to disrupt a hub (e.g. rip current statements) still count. It also uses the hub's city-center point, and is only as fresh as the last check.
+
+**Deployment**
+
+- **Render's filesystem is ephemeral.** Each build re-creates the cache with the refresh. What the app writes to the cache at runtime (the hourly NWS alerts and new score snapshots) is lost when the service restarts or sleeps, and the next start begins again from the build's cache.
 
 **Scoring**
 

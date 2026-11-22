@@ -2,6 +2,8 @@
 
 _Status: v1, approved 2026-11-22 · Coral (planned with Claude)_
 
+This file covers **what** to build. **How** Claude Code works in this repo (rules, conventions, commands, gate reports) is in `CLAUDE.md`.
+
 ## 1. Goal
 
 An agent that helps logistics analysts decide which distribution hubs are most exposed to severe-weather disruption and should be prioritized for resilience investment. Analysts ask questions in a chat; the agent answers using public weather and hazard data plus a deterministic scoring model, and explains its reasoning.
@@ -180,6 +182,7 @@ Every case also checks that the output is a valid `AgentAnswer` and that each `k
 ```
 weather-risk-agent/
 ├── README.md            # how to run, assumptions, limitations
+├── CLAUDE.md            # working rules for Claude Code
 ├── PLAN.md              # this file
 ├── DESIGN.md            # architecture, repo structure, storage choice
 ├── requirements.txt
@@ -216,12 +219,10 @@ weather-risk-agent/
 
 1. **[Coral]** Opens a new Claude Code session in the repo folder and sends this prompt, with N filled in:
    ```
-   Read PLAN.md. Execute Phase N only: its steps in §13, plus the sections they reference.
-   Don't add features or tests the phase doesn't list.
-   Stop at Gate N, show the gate output, and wait for my review. Do not run git commit.
+   Execute Phase N only: PLAN.md §13 and the sections it references. Stop at Gate N.
    ```
-   One session per phase keeps each session focused. PLAN.md carries the context, and the exported build sessions (Phase 8) line up with the phases.
-2. **[CC]** (Claude Code) Does the steps marked [CC], in order. If something doesn't match this plan, or an API returns something unexpected, it stops and reports (§14).
+   Claude Code loads `CLAUDE.md` automatically, so the working rules don't need repeating in the prompt. One session per phase keeps each session focused. PLAN.md carries the context, and the exported build sessions (Phase 8) line up with the phases.
+2. **[CC]** (Claude Code) Does the steps marked [CC], in order, following `CLAUDE.md`. If something doesn't match this plan, or an API returns something unexpected, it stops and reports.
 3. **[CC]** At the gate, shows the listed output and stops.
 4. **[Coral]** Reviews against the gate checklist. If something needs fixing, she says what; Claude Code fixes it and shows the gate output again.
 5. **[Coral]** When the gate passes, commits with the suggested message and moves to the next phase.
@@ -254,7 +255,7 @@ weather-risk-agent/
 - The Python version in `.venv`, and confirmation that the install finished without errors.
 
 **Gate 0: Coral checks**
-- Run `git status`. It lists `.gitignore`, `.env.example`, `requirements.txt` and `PLAN.md`, and does **not** list `.env` or `.venv/`.
+- Run `git status`. It lists `.gitignore`, `.env.example`, `requirements.txt`, `PLAN.md` and `CLAUDE.md`, and does **not** list `.env` or `.venv/`.
 
 **Commit:** `phase 0: project setup`
 
@@ -287,7 +288,7 @@ weather-risk-agent/
 **Before you start:** the NRI field type was decided at Gate 1.
 
 **Steps**
-1. **[CC]** Create `app/config.py` with every threshold (§3, §6), the cap for each weather metric, the NRI/weather split and the category weights (§15). Propose each cap value with a one-line reason.
+1. **[CC]** Create `app/config.py` with every threshold (§3, §6), the cap for each weather metric, the NRI/weather split and the category weights (§14). Propose each cap value with a one-line reason.
 2. **[CC]** Create `app/scoring.py` per §6: NRI part, weather part, category scores, overall score, and the full breakdown. It reads only from the cache.
 3. **[CC]** In `app/scoring.py`, add the yearly weather statistics that the Phase 3 `weather_stat` tool will use (e.g. % of days with snowfall ≥ 0.25 cm, snow days ≥ 1 cm), computed from the cached daily data.
 4. **[CC]** Extend `refresh`: after fetching, compute the scores and write one `score_snapshots` row per hub.
@@ -378,7 +379,7 @@ weather-risk-agent/
 **Steps**
 1. **[CC]** Create `app/sources/nws.py`: active alerts at each hub's point (§5), sent with a `User-Agent` header. Add it to `refresh`.
 2. **[CC]** Create `app/alerts.py` and `POST /scores/refresh` per §11, including `current_risk` from NWS alerts.
-3. **[CC]** Only if time remains (§15): deploy to Render and add the public URL to the README.
+3. **[CC]** Only if time remains (§14): deploy to Render and add the public URL to the README.
 
 **Gate 7: Claude Code shows** an alert firing (the webhook POST or the log line) and how it was triggered.
 
@@ -392,22 +393,14 @@ weather-risk-agent/
 3. **[CC]** Fix what the clean run found, with Coral's approval.
 4. **[Coral]** Make the final commit and submit.
 
-## 14. Working agreement with the AI coding agent
-
-- Follow this plan. Anything outside it: ask first.
-- Stop at every gate. Never start the next phase unprompted.
-- No features or tests beyond what's listed here.
-- Never run `git commit`. Coral commits after each gate.
-- Never invent data values. If an API response doesn't match expectations, stop and report it.
-
-## 15. Decisions (approved by Coral, 2026-11-22)
+## 14. Decisions (approved by Coral, 2026-11-22)
 
 1. Hub list in §4: approved as is.
 2. Scoring: 50/50 NRI vs observed weather, equal category weights: approved.
 3. UI: a single HTML page served by FastAPI.
 4. Deploy to a public URL: only at the end, if time remains.
 
-## 16. Risks
+## 15. Risks
 
 | Risk | Mitigation |
 |---|---|

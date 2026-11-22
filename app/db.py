@@ -17,8 +17,9 @@ CREATE TABLE IF NOT EXISTS api_cache (
 CREATE TABLE IF NOT EXISTS score_snapshots (
     hub_id         TEXT NOT NULL,
     computed_at    TEXT NOT NULL, -- UTC, ISO 8601
-    overall        REAL NOT NULL,
-    breakdown_json TEXT NOT NULL
+    overall        REAL NOT NULL, -- the exposure score
+    breakdown_json TEXT NOT NULL,
+    current_risk   REAL           -- from NWS active alerts (§11); NULL in rows from before Phase 7
 );
 """
 
@@ -28,6 +29,10 @@ def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.executescript(SCHEMA)
+    # A database created before Phase 7 has no current_risk column yet: add it.
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(score_snapshots)")]
+    if "current_risk" not in columns:
+        conn.execute("ALTER TABLE score_snapshots ADD COLUMN current_risk REAL")
     return conn
 
 
@@ -57,10 +62,38 @@ def load_response(conn: sqlite3.Connection, source: str, cache_key: str) -> dict
     return json.loads(row[0])
 
 
-def save_snapshot(conn: sqlite3.Connection, hub_id: str, computed_at: str, breakdown: dict) -> None:
-    """Append one hub's score to the history. Does not commit."""
+def load_fetched_at(conn: sqlite3.Connection, source: str, cache_key: str) -> str:
+    """When one cached API response was fetched (UTC, ISO 8601). Raises if it isn't cached."""
+    row = conn.execute(
+        "SELECT fetched_at FROM api_cache WHERE source = ? AND cache_key = ?",
+        (source, cache_key),
+    ).fetchone()
+    if row is None:
+        raise LookupError(
+            f"No cached {source} data for '{cache_key}'. Run: python -m app.refresh"
+        )
+    return row[0]
+
+
+def save_snapshot(
+    conn: sqlite3.Connection, hub_id: str, computed_at: str, breakdown: dict, current_risk: float
+) -> None:
+    """Append one hub's scores to the history. Does not commit."""
     conn.execute(
-        "INSERT INTO score_snapshots (hub_id, computed_at, overall, breakdown_json) "
-        "VALUES (?, ?, ?, ?)",
-        (hub_id, computed_at, breakdown["overall"], json.dumps(breakdown)),
+        "INSERT INTO score_snapshots (hub_id, computed_at, overall, breakdown_json, current_risk) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (hub_id, computed_at, breakdown["overall"], json.dumps(breakdown), current_risk),
     )
+
+
+def load_latest_snapshots(conn: sqlite3.Connection) -> dict:
+    """Each hub's newest snapshot: {hub_id: {"overall": ..., "current_risk": ...}}.
+
+    Hubs with no snapshot yet are absent. current_risk is None in older rows.
+    """
+    rows = conn.execute(
+        "SELECT hub_id, overall, current_risk FROM score_snapshots "
+        "ORDER BY computed_at, rowid"
+    ).fetchall()
+    # Rows come oldest first, so each hub's newest row is the one that remains.
+    return {hub_id: {"overall": overall, "current_risk": risk} for hub_id, overall, risk in rows}

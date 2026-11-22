@@ -90,5 +90,14 @@
        "arguments": {"hub_id": "chicago", "metric": "snowfall_days", "year": 2024},
        "field": "days"}
     ]
+  },
+  {
+    "id": 11,
+    "name": "Active alerts at our hubs",
+    "turns": ["Are there active weather alerts at any of our hubs right now?"],
+    "checks": [
+      {"type": "tool_called", "tool": "current_alerts", "arguments": {}},
+      {"type": "alerts_match_tool"}
+    ]
   }
 ]

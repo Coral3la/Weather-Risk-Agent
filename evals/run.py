@@ -3,7 +3,7 @@
     python -m evals.run
 
 Layer A: deterministic checks on the scoring engine. No LLM.
-Layer B: the ten agent cases in evals/cases.json. The agent answers with the real
+Layer B: the agent cases in evals/cases.json. The agent answers with the real
          LLM; plain code then checks the answer. No LLM grades another LLM.
 
 Expected values are never written into the cases. Each check asks the scoring
@@ -191,6 +191,22 @@ def contradicts_premise(spec, answer, calls) -> dict:
                   f"score in key_figures: {has_score}; phrase found: {phrase!r}")
 
 
+def alerts_match_tool(spec, answer, calls) -> dict:
+    """The answer reports only what current_alerts returns: the hubs with an active
+    alert (and no others), every alert's event name, and the fetch time (as_of)."""
+    result = engine("current_alerts", hub_ids=None, region=None)
+    expected = sorted(result["hubs_with_active_alerts"])
+    got = sorted(hub["hub_id"] for hub in answer["hubs"])
+    text = answer["answer"].lower()
+    events = {alert["event"] for hub in result["hubs"] for alert in hub["active_alerts"]}
+    missing = sorted(event for event in events if event.lower() not in text)
+    as_of_stated = result["as_of"].lower() in text
+    return passed(got == expected and not missing and as_of_stated and answer["out_of_scope"] is False,
+                  f"tool: hubs with alerts {expected}, as of {result['as_of']}; answer hubs: {got}; "
+                  f"events missing from text: {missing or 'none'}; as_of in text: {as_of_stated}; "
+                  f"out_of_scope = {answer['out_of_scope']}")
+
+
 CHECKS = {
     "tool_called": tool_called,
     "top_hubs_match_engine": top_hubs_match_engine,
@@ -199,6 +215,7 @@ CHECKS = {
     "out_of_scope": out_of_scope,
     "no_hub_scores": no_hub_scores,
     "contradicts_premise": contradicts_premise,
+    "alerts_match_tool": alerts_match_tool,
 }
 
 

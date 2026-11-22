@@ -23,7 +23,8 @@ Category = Literal[tuple(config.CATEGORIES)]
 CategoryOrOverall = Literal[tuple([*config.CATEGORIES, config.OVERALL])]
 Metric = Literal[tuple(config.WEATHER_METRICS)]
 Year = Literal[tuple(config.SCORE_YEARS)]
-ToolName = Literal["list_hubs", "rank_hubs", "compare_hubs", "explain_hub_score", "weather_stat"]
+ToolName = Literal["list_hubs", "rank_hubs", "compare_hubs", "explain_hub_score", "weather_stat",
+                   "current_alerts"]
 
 
 class StrictModel(BaseModel):
@@ -74,13 +75,19 @@ class WeatherStatArgs(StrictModel):
     year: Year = Field(description="Calendar year.")
 
 
+class CurrentAlertsArgs(StrictModel):
+    hub_ids: list[HubId] | None = Field(description="Only these hubs. null = all hubs.")
+    region: Region | None = Field(description="Only hubs in this region. null = all hubs.")
+
+
 # --- The agent's final answer -------------------------------------------------------
 
 class HubRef(StrictModel):
     hub_id: str
     name: str
     score: float | None = Field(
-        description="null if the answer covers two or more categories, or has no score. "
+        description="null if the answer covers two or more categories, is about NWS alerts, "
+                    "or has no score. "
                     "Otherwise the hub's score for the single category (or overall) the "
                     "answer is about, copied from a tool result."
     )

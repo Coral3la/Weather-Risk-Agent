@@ -34,7 +34,7 @@ The LLM never produces numbers. Deterministic Python code computes every score, 
 - `requirements.txt` with exact pinned versions. Each phase adds only the dependencies it needs.
 - OpenAI Python SDK directly; no LangChain or other agent frameworks. The model comes from `OPENAI_MODEL` in `.env`.
 - SQLite through Python's standard library. The database is `data/cache.db` and is not committed to git.
-- Only `python -m app.refresh` calls external APIs. Everything else reads from the cache.
+- Only `app/refresh.py` calls the data APIs (Open-Meteo, NRI, NWS): via `python -m app.refresh` (all sources), or `POST /scores/refresh` and the server's scheduled check (NWS only). `app/alerts.py` POSTs alerts to `ALERT_WEBHOOK_URL`. Everything else reads from the cache.
 - Thresholds, caps, weights and paths live in `app/config.py`. No magic numbers elsewhere.
 - Hub data lives only in `data/hubs.json`.
 - Code, comments and docs in English. Keep the code simple and readable: Coral will walk through it live in the interview.
@@ -49,6 +49,8 @@ The LLM never produces numbers. Deterministic Python code computes every score, 
 | Agent in the terminal | `python -m app.agent` | Phase 3 |
 | Run the app | `uvicorn app.main:app` → http://localhost:8000 | Phase 4 |
 | Run the evals | `python -m evals.run` | Phase 5 |
+| Demo an alert (simulated data) | `python -m scripts.simulate_alert` | Phase 7 |
+| Run the app on the simulated copy | `CACHE_DB_PATH=data/simulated.db ALERT_CHECK_INTERVAL_MINUTES=0 uvicorn app.main:app` | Phase 7 |
 
 ## Gate report format
 

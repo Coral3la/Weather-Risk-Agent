@@ -31,23 +31,29 @@ flowchart TB
 
     subgraph refresh["Refresh (offline)"]
         refresh_cmd["python -m app.refresh"]
-        sources["Open-Meteo, FEMA NRI<br/>(the only external data calls)"]
+        refresh_api["Scheduled check (hourly) and<br/>POST /scores/refresh (NWS alerts only)"]
+        sources["Open-Meteo, FEMA NRI, NWS alerts<br/>(the only external data calls)"]
+        alerts["Alerts (app/alerts.py)<br/>webhook or log line when a score changes"]
 
         refresh_cmd --> sources
+        refresh_api --> sources
+        refresh_cmd --> alerts
+        refresh_api --> alerts
     end
 
     scoring -->|"reads only"| cache
     refresh_cmd -->|"writes"| cache
 ```
 
-There are two separate paths:
+There are two separate paths, refresh and chat, plus an alert step on the refresh path:
 
-- **Refresh (offline, run by hand).** `python -m app.refresh` fetches the weather history and the NRI rows for all 14 hubs, stores the raw responses, then computes the scores and stores one snapshot per hub. It fetches everything before writing anything, in one transaction, so a failed request leaves the existing cache untouched.
-- **Chat (online).** A question goes to the agent. Everything it needs is read from the cache; no weather or NRI API is called. The only network call is to OpenAI.
+- **Refresh (offline, run by hand).** `python -m app.refresh` fetches the weather history, the NRI rows and the active NWS alerts for all 14 hubs, stores the raw responses, then computes the scores and stores one snapshot per hub. It fetches everything before writing anything, in one transaction, so a failed request leaves the existing cache untouched.
+- **Alerts (bonus).** The NWS-only refresh fetches just the NWS alerts, the one source that changes from hour to hour. It runs from a background task in the server (right after startup, then every 60 minutes; in a thread, so chat isn't blocked) and from `POST /scores/refresh`; a lock keeps the two from overlapping. Every refresh also computes a `current_risk` per hub (the highest severity among its active NWS alerts, mapped to 0–100 in `app/config.py`), compares both scores with the hub's previous snapshot, and sends each change that crosses its threshold to `ALERT_WEBHOOK_URL`, or logs it if the URL is empty (`app/alerts.py`). `current_risk` is kept apart from the exposure score, which is stable by design. The agent can report the cached alerts through the `current_alerts` tool, always with their fetch time, but never uses `current_risk` in a ranking.
+- **Chat (online).** A question goes to the agent. Everything it needs is read from the cache; no weather, NRI or NWS API is called. The only network call is to OpenAI.
 
 ### One chat turn
 
-1. The agent sends the system prompt, the session's history and the new message to the LLM, with the five tool schemas.
+1. The agent sends the system prompt, the session's history and the new message to the LLM, with the six tool schemas.
 2. The LLM replies with tool calls. Code validates the arguments, runs the tools and sends the results back.
 3. Step 2 repeats, at most 5 times. After that the LLM must answer with what it has.
 4. The LLM returns a final answer in the `AgentAnswer` schema.
@@ -62,6 +68,7 @@ There are two separate paths:
 | `compare_hubs(hub_ids, categories)` | Side-by-side scores with breakdowns, and who is highest per category |
 | `explain_hub_score(hub_id)` | One hub's full breakdown, its rank among all hubs, and its categories ordered by contribution |
 | `weather_stat(hub_id, metric, year)` | Days in one year passing a weather threshold, as a count and a percentage |
+| `current_alerts(hub_ids, region)` | The NWS alerts active at each hub when the cache was last refreshed, each hub's `current_risk`, and the fetch time |
 
 Tool results carry the comparisons too (ranks, "highest per category", categories by contribution), so the LLM never has to compare or derive numbers itself.
 
@@ -89,7 +96,7 @@ The chat page shows `answer`, and puts the tools used, key figures, assumptions 
 | Structured output | `agent._ask_llm` | The final answer must match the `AgentAnswer` JSON schema (OpenAI structured outputs). |
 | Runtime number check | `agent.unsupported_key_figures` | Every `key_figures` value must appear in a tool result from the session. If one doesn't, the answer is rejected and the LLM is asked again, with the unsupported values named. |
 | One retry, then an error | `agent.run_turn` | An answer that fails the schema or the number check is retried once. If it fails again, the user gets an error object, never unvalidated text. |
-| System-prompt rules | `agent.SYSTEM_PROMPT` | Use only numbers from tool results; state when a question is out of scope; check a question's premise against the data; list assumptions. |
+| System-prompt rules | `agent.SYSTEM_PROMPT` | Use only numbers from tool results; state when a question is out of scope; check a question's premise against the data; list assumptions; state the fetch time of any alert, and keep `current_risk` out of rankings. |
 
 The number check covers `key_figures`, not the prose in `answer`. That limit is listed in the README.
 
@@ -102,31 +109,36 @@ Weather-Risk-Agent/
 ├── PLAN.md              # the build plan and the decisions made at each gate
 ├── CLAUDE.md            # working rules for Claude Code
 ├── requirements.txt     # six pinned dependencies
-├── .env.example         # OPENAI_API_KEY, OPENAI_MODEL, ALERT_WEBHOOK_URL (unused)
+├── .env.example         # OPENAI_API_KEY, OPENAI_MODEL, ALERT_WEBHOOK_URL (optional)
 ├── data/
 │   ├── hubs.json        # the 14 hubs: id, city, state, region, county, FIPS, lat, lon
-│   └── cache.db         # created by refresh; not in git
+│   ├── cache.db         # created by refresh; not in git
+│   └── simulated.db     # created by scripts/simulate_alert.py; not in git
 ├── app/
 │   ├── config.py        # every path, threshold, cap and weight
 │   ├── db.py            # SQLite: the API cache and the score snapshots
-│   ├── refresh.py       # fetch all data, then compute and store the scores
+│   ├── refresh.py       # fetch the data, compute and store the scores, alert on changes
 │   ├── sources/
 │   │   ├── open_meteo.py   # daily weather history per hub
-│   │   └── fema_nri.py     # NRI row per county
+│   │   ├── fema_nri.py     # NRI row per county
+│   │   └── nws.py          # active NWS alerts per hub
 │   ├── scoring.py       # the deterministic scoring engine and weather statistics
+│   ├── alerts.py        # current risk from NWS alerts; webhook or log on a change
 │   ├── schemas.py       # Pydantic models: tool arguments and AgentAnswer
-│   ├── tools.py         # the five tools and their JSON schemas
+│   ├── tools.py         # the six tools and their JSON schemas
 │   ├── agent.py         # the LLM loop, the system prompt, the terminal chat
-│   └── main.py          # FastAPI routes; serves the chat page
+│   └── main.py          # FastAPI routes; serves the chat page; runs the scheduled alert check
+├── scripts/
+│   └── simulate_alert.py   # demo: a SIMULATED alert on a copy of the database
 ├── web/
 │   └── index.html       # the chat page: plain HTML and JavaScript, no build step
 └── evals/
-    ├── cases.json       # the ten agent cases and their checks
+    ├── cases.json       # the eleven agent cases and their checks
     ├── run.py           # the eval runner
     └── results.json     # the most recent run
 ```
 
-The dependencies point one way: `main` → `agent` → `tools` → `scoring` → `db`. `config.py` is imported by all of them and imports nothing from the app. Only `refresh.py` imports `sources/`.
+The dependencies point one way: `main` → `agent` → `tools` → `scoring` → `db`. `config.py` is imported by all of them and imports nothing from the app. `refresh.py` is the only code that calls `sources/`; `main` imports it for `POST /scores/refresh` and the scheduled check. `tools` also reads the cached alerts through `alerts.py`.
 
 ## Scoring model
 
@@ -178,12 +190,12 @@ Each step is computed from unrounded values and rounded only when reported. Re-a
 
 ## Storage: SQLite
 
-One file, `data/cache.db`, with two tables:
+One file, `data/cache.db` (or the file named by the `CACHE_DB_PATH` environment variable), with two tables:
 
 | Table | Columns | Content |
 |---|---|---|
-| `api_cache` | `source, cache_key, fetched_at, payload_json` | The raw API response per hub (Open-Meteo) or per county (NRI). A refresh replaces it. |
-| `score_snapshots` | `hub_id, computed_at, overall, breakdown_json` | One row per hub per refresh. Rows are appended, so they form a score history. |
+| `api_cache` | `source, cache_key, fetched_at, payload_json` | The raw API response per hub (Open-Meteo, NWS) or per county (NRI). A refresh replaces it. |
+| `score_snapshots` | `hub_id, computed_at, overall, breakdown_json, current_risk` | One row per hub per refresh. Rows are appended, so they form a score history. |
 
 **Why SQLite.** It is a single file with no server, it ships with Python, and it is more than enough for 14 hubs. It is also easy to open and inspect. Postgres would add setup with no benefit at this size.
 
@@ -194,7 +206,7 @@ One file, `data/cache.db`, with two tables:
 - Chat sessions are kept in memory and lost on restart.
 - The database file itself is not in git. `python -m app.refresh` rebuilds it.
 
-**How scores are served.** The tools recompute scores from the cached raw data on each call, using the current `config.py`. With 14 hubs this is fast (a full ranking takes well under a second), and it means a config change takes effect without a refresh. The `score_snapshots` table is a history written at refresh time; the app reads it only for the last-refresh time in `GET /health`.
+**How scores are served.** The tools recompute scores from the cached raw data on each call, using the current `config.py`. With 14 hubs this is fast (a full ranking takes well under a second), and it means a config change takes effect without a refresh. The `score_snapshots` table is a history written at refresh time; the app reads it for the last-refresh time in `GET /health`, and each refresh reads the previous row per hub to detect changes.
 
 ## Why no agent framework
 
@@ -206,14 +218,14 @@ The agent uses the OpenAI Python SDK directly. There is no LangChain or other fr
 - **The SDK already does the generic work.** It turns the Pydantic models into strict JSON schemas, for both the tools and the final answer, and parses the reply back into them.
 - **Fewer dependencies.** Six pinned packages in total.
 
-The cost: no built-in tracing, streaming or persistent memory. For a single-agent loop with five tools, that trade is worth it.
+The cost: no built-in tracing, streaming or persistent memory. For a single-agent loop with six tools, that trade is worth it.
 
 ## Evals
 
 `python -m evals.run` runs two layers and saves the results to `evals/results.json`.
 
 - **Layer A: three deterministic checks, no LLM.** A snowfall percentage recounted from the raw cached days equals the tool's value; Midwest rankings contain only Midwest hubs, in descending order, within 0–100; scoring twice gives identical results.
-- **Layer B: ten agent cases, run against the real LLM and checked by code.** No LLM grades another LLM. The cases are the four assignment questions, a follow-up, an unknown hub, a false premise, a top-3 question, a forecast question and one more statistic.
+- **Layer B: eleven agent cases, run against the real LLM and checked by code.** No LLM grades another LLM. The cases are the four assignment questions, a follow-up, an unknown hub, a false premise, a top-3 question, a forecast question, one more statistic and an active-alerts question.
 
 Expected values are never written into the cases. Each check asks the scoring engine for the right value at run time, so the evals stay correct when the data or the config changes. Every Layer B case also checks that the answer is a valid `AgentAnswer` and that every `key_figures` value appears in a tool result.
 

@@ -7,7 +7,7 @@ A chat agent that helps logistics analysts decide which US distribution hubs are
 - It answers rankings, comparisons, weather statistics, "why is this hub's score high?" questions and follow-ups.
 - **The LLM doesn't compute numbers.** Python code computes every score, statistic and ranking. The LLM picks which tool to call and explains the result.
 
-Data: Open-Meteo daily weather history (2021–2025) and the FEMA National Risk Index (county level, December 2025 release). Both are free and need no key.
+Data: Open-Meteo daily weather history (2021–2025) and the FEMA National Risk Index (county level, December 2025 release). Both are free and need no key. A separate, live signal uses the National Weather Service's active alerts (see "Alerts").
 
 The design is explained in [DESIGN.md](DESIGN.md). The build plan and its decisions are in [PLAN.md](PLAN.md).
 
@@ -36,9 +36,14 @@ flowchart TB
 
     subgraph refresh["Refresh (offline)"]
         refresh_cmd["python -m app.refresh"]
-        sources["Open-Meteo, FEMA NRI<br/>(the only external data calls)"]
+        refresh_api["Scheduled check (hourly) and<br/>POST /scores/refresh (NWS alerts only)"]
+        sources["Open-Meteo, FEMA NRI, NWS alerts<br/>(the only external data calls)"]
+        alerts["Alerts (app/alerts.py)<br/>webhook or log line when a score changes"]
 
         refresh_cmd --> sources
+        refresh_api --> sources
+        refresh_cmd --> alerts
+        refresh_api --> alerts
     end
 
     scoring -->|"reads only"| cache
@@ -65,7 +70,7 @@ cp .env.example .env
 # Open .env and fill in:
 #   OPENAI_API_KEY=<your key>
 #   OPENAI_MODEL=<a model that supports structured outputs and tool calling; built and evaluated with gpt-4o>
-# ALERT_WEBHOOK_URL is not used yet; leave it empty.
+# ALERT_WEBHOOK_URL is optional: where risk-change alerts are POSTed. Empty = alerts are logged.
 
 # 3. Fetch the data and compute the scores (required)
 python -m app.refresh
@@ -75,9 +80,9 @@ uvicorn app.main:app
 # Open http://localhost:8000
 ```
 
-**Step 3 is required.** The database (`data/cache.db`) isn't in git; refresh creates it. Refresh is the only command that calls the weather and NRI APIs. It needs no API key. If refresh hits Open-Meteo's free-tier rate limit, it prints "Open-Meteo rate limit reached; waiting …" and retries after the wait the API asks for.
+**Step 3 is required.** The database (`data/cache.db`) isn't in git; refresh creates it. Refresh is the only command that calls the weather, NRI and NWS APIs. It needs no API key. If refresh hits Open-Meteo's free-tier rate limit, it prints "Open-Meteo rate limit reached; waiting …" and retries after the wait the API asks for.
 
-After the refresh, the app reads only from the cache. The only network call left is to OpenAI.
+After the refresh, the chat reads only from the cache; its only network call is to OpenAI. Separately, while the server runs it re-fetches the NWS alerts once an hour (see "Alerts").
 
 ### Other commands
 
@@ -85,6 +90,17 @@ After the refresh, the app reads only from the cache. The only network call left
 |---|---|
 | Chat in the terminal instead of the browser | `python -m app.agent` |
 | Run the evals | `python -m evals.run` |
+| Check the NWS alerts now | `curl -X POST http://localhost:8000/scores/refresh` |
+| Demo an alert with simulated data | `python -m scripts.simulate_alert` (see "Alerts") |
+
+### Environment variables
+
+| Variable | Where | What |
+|---|---|---|
+| `OPENAI_API_KEY`, `OPENAI_MODEL` | `.env` | Required for the chat and the evals. |
+| `ALERT_WEBHOOK_URL` | `.env` | Optional. Where alerts are POSTed; empty = logged. |
+| `CACHE_DB_PATH` | the command line | Optional. Use another database file instead of `data/cache.db`, e.g. `CACHE_DB_PATH=data/simulated.db ALERT_CHECK_INTERVAL_MINUTES=0 uvicorn app.main:app` for the simulated copy (the scheduled check is turned off so it doesn't overwrite the simulated alert). The server logs the path at startup. |
+| `ALERT_CHECK_INTERVAL_MINUTES` | the command line | Optional. Overrides the scheduled-check interval in `app/config.py` (60) for one run; `0` turns it off. |
 
 ### API
 
@@ -95,6 +111,7 @@ After the refresh, the app reads only from the cache. The only network call left
 | `GET /hubs` | The 14 hubs |
 | `GET /scores?category=&region=` | Hubs ranked by score. `category` is one of the five categories or `overall` (the default). |
 | `GET /health` | `{"status": "ok", "scores_computed_at": ...}`: the time of the last refresh, or null if it never ran |
+| `POST /scores/refresh` | Fetches the active NWS alerts, recomputes both scores and alerts on changes. Returns `{computed_at, hubs, changes}`. See "Alerts". |
 
 ## Assumptions
 
@@ -153,6 +170,42 @@ Rule: each cap is the 99th percentile of that hazard's annualized frequency acro
 
 **Other settings:** scores are reported to 1 decimal; the agent may request tools at most 5 times per question; an answer that fails validation is retried once.
 
+## Alerts
+
+The exposure score is meant to be stable: it changes only when the data or `app/config.py` changes. So alerts watch a second, live signal as well.
+
+- **`current_risk`** per hub: the highest severity among the NWS alerts active at the hub's point right now, mapped to 0–100. No active alert is 0.
+
+  | NWS severity | Extreme | Severe | Moderate | Minor | Unknown |
+  |---|---|---|---|---|---|
+  | `current_risk` | 100 | 75 | 50 | 25 | 0 |
+
+- **When an alert fires.** Every refresh stores a snapshot per hub and compares it with the previous one. It alerts when `current_risk` moved by at least 25 points (one severity level), or the overall exposure score by at least 1.0 point, up or down. A hub's first `current_risk` is a baseline and doesn't alert.
+- **Where it goes.** Each change is POSTed as JSON to `ALERT_WEBHOOK_URL`. If that is empty, it is written to the log as one `ALERT ...` line.
+- **When it is checked.** Three things run the same check:
+  - **The scheduled check.** While the server runs, a background task fetches the NWS alerts right after startup and then every 60 minutes (`ALERT_CHECK_INTERVAL_MINUTES` in `app/config.py`; `0` turns it off). It runs in a thread, so chat requests aren't blocked. A failed run is logged and the next one still runs.
+  - **`POST /scores/refresh`**, for an external scheduler or a check on demand: `curl -X POST http://localhost:8000/scores/refresh`. It never overlaps with the scheduled check: one waits for the other.
+  - **`python -m app.refresh`**, after its full fetch.
+
+  The first two fetch only the NWS alerts (the weather history and NRI don't change) and take a few seconds.
+- **Asking the chat.** "Are there active weather alerts at any of our hubs right now?" The agent's `current_alerts` tool reads the cached NWS alerts (the chat itself calls no weather API) and every answer states when they were fetched ("as of ..."). The agent reports alerts NWS has issued; it doesn't forecast.
+
+The mapping, both thresholds and the interval live in `app/config.py`. `current_risk` is separate from the exposure scores: it never enters a ranking or an investment answer.
+
+**Demo with a simulated alert.** Real alerts at the hubs are rare, so a script makes one fire on a copy of the database:
+
+```bash
+# Copies data/cache.db to data/simulated.db, puts one alert labeled SIMULATED into
+# Houston's cached NWS response in the copy, and runs the alert check on the copy.
+python -m scripts.simulate_alert
+
+# Chat with the simulated data: the server on the copy, with the scheduled check off
+# (it would replace the simulated alert with the real NWS data).
+CACHE_DB_PATH=data/simulated.db ALERT_CHECK_INTERVAL_MINUTES=0 uvicorn app.main:app
+```
+
+The script never writes to the real database, and its alert is only logged, never sent to `ALERT_WEBHOOK_URL`.
+
 ## Out of scope
 
 The agent says so (and sets `out_of_scope`) when asked for any of these:
@@ -161,7 +214,7 @@ The agent says so (and sets `out_of_scope`) when asked for any of these:
 - **Business impact:** hub throughput, revenue, upgrade cost. The agent ranks *exposure*, not return on investment. A real investment priority is exposure × business impact, and we have no data for the second factor.
 - **Hubs or cities outside the list of 14.**
 
-Not built: voice, authentication, multi-user persistence, live alerts, a public deployment.
+Not built: voice, authentication, multi-user persistence, a public deployment.
 
 ## Limitations
 
@@ -174,6 +227,8 @@ Not built: voice, authentication, multi-user persistence, live alerts, a public 
 - **NRI frequency is not severity.** The annualized-frequency field counts how often a hazard occurs, not how damaging it is.
 - **Five years of weather is a short window.** One unusual year moves a hub's average.
 - **Hurricane and severe-storm scores rest on NRI alone,** with no observed-weather half.
+
+- **`current_risk` does not filter by alert type.** Every active NWS alert counts by its severity, so alerts unlikely to disrupt a hub (e.g. rip current statements) still count. It also uses the hub's city-center point, and is only as fresh as the last check.
 
 **Scoring**
 
@@ -189,7 +244,8 @@ Not built: voice, authentication, multi-user persistence, live alerts, a public 
 **Evals**
 
 - **Layer B needs an OpenAI key and costs API calls.** It runs the real agent. Layer A (the deterministic checks) needs neither, but the runner always runs both layers.
-- **The model is non-deterministic.** Layer B was run 3 times during the build; only the last run, after the final fixes, is saved (`evals/results.json`: gpt-4o, Layer A 3/3, Layer B 10/10). A pass shows the agent can answer a case correctly, not that it always will.
+- **The model is non-deterministic.** Layer B was run 4 times during the build; only the last run, after the final fixes, is saved (`evals/results.json`: gpt-4o, Layer A 3/3, Layer B 11/11). A pass shows the agent can answer a case correctly, not that it always will.
 - **Case 7 (false premise) is a phrase match.** It passes when the answer carries Phoenix's real winter score in `key_figures` and its text contains one of a fixed list of phrases such as "not high" or "low" (listed in `evals/cases.json`). It doesn't judge whether the answer as a whole rejects the premise.
 - **The `key_figures` eval check has the same limit as the runtime check:** it covers `key_figures`, not numbers in the answer text. Only cases 3 and 10 also look for a specific value in the text.
-- **Ten cases is a small set.** It covers the four assignment questions and six edge cases, not the range of questions an analyst might ask.
+- **Case 11 (active alerts) depends on what is in the cache.** It checks the answer against the `current_alerts` tool: the hubs with an alert, each alert's event name, and the fetch time. When no alert is active, as in the saved run, it only shows that the agent lists no hub and states the fetch time.
+- **Eleven cases is a small set.** It covers the four assignment questions, six edge cases and one alert question, not the range of questions an analyst might ask.

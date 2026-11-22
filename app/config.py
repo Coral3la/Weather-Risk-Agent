@@ -4,12 +4,18 @@ Nothing here is computed from the data at run time: every value is fixed, so a
 hub's score only changes when the data or this file changes.
 """
 
+import os
 from pathlib import Path
 
 # --- Paths -------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parent.parent
 HUBS_PATH = ROOT / "data" / "hubs.json"
-DB_PATH = ROOT / "data" / "cache.db"
+# The database is data/cache.db unless the CACHE_DB_PATH environment variable names
+# another file (e.g. the copy made by scripts/simulate_alert.py). A relative path
+# is taken from the repo root.
+DEFAULT_DB_PATH = ROOT / "data" / "cache.db"
+SIMULATED_DB_PATH = ROOT / "data" / "simulated.db"
+DB_PATH = ROOT / (os.environ.get("CACHE_DB_PATH") or DEFAULT_DB_PATH)
 WEB_PAGE_PATH = ROOT / "web" / "index.html"
 
 # --- Observation window (§3) -------------------------------------------------
@@ -136,6 +142,33 @@ CATEGORY_WEIGHTS = {
 # Scores are rounded to this many decimals when reported. Each step is computed
 # from unrounded values, so re-adding rounded parts by hand can differ by 0.1.
 SCORE_DECIMALS = 1
+
+# --- Current risk and alerts (§11, bonus) ----------------------------------------
+# current_risk = the highest score among the NWS alerts active at the hub's point,
+# or 0 with no active alert. NWS severity is an ordered four-level scale, so the
+# levels are spaced evenly. "Unknown" (severity not stated) counts as 0.
+NWS_SEVERITY_SCORES = {
+    "Extreme": 100,
+    "Severe": 75,
+    "Moderate": 50,
+    "Minor": 25,
+    "Unknown": 0,
+}
+
+# A refresh alerts when a hub's score moved at least this far, up or down, since
+# the last snapshot.
+# current_risk: 25 = one severity level, so every change of level alerts.
+CURRENT_RISK_ALERT_THRESHOLD = 25
+# Exposure (the overall score): it only moves when the data or this file changes.
+# 1.0 is ten times the reporting precision, so rounding never alerts.
+EXPOSURE_ALERT_THRESHOLD = 1.0
+
+WEBHOOK_TIMEOUT_SECONDS = 10
+
+# While the server runs, it checks the NWS alerts right after startup and then
+# every this many minutes. 0 turns the scheduled check off. The environment
+# variable of the same name overrides it for one run (a demo or a test).
+ALERT_CHECK_INTERVAL_MINUTES = float(os.environ.get("ALERT_CHECK_INTERVAL_MINUTES", 60))
 
 # --- Agent (§7) ------------------------------------------------------------------
 REGIONS = ["Midwest", "South", "West", "Northeast"]  # US Census regions (§3)

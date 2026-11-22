@@ -33,6 +33,8 @@ What you have
 ({", ".join(config.CATEGORIES)}) and overall. They combine FEMA National Risk Index county \
 data with Open-Meteo daily weather for {config.FIRST_YEAR}-{config.LAST_YEAR}.
 - Yearly weather statistics per hub for {config.FIRST_YEAR}-{config.LAST_YEAR}.
+- The National Weather Service (NWS) alerts active at each hub when the data was last \
+fetched (call current_alerts), with a current_risk per hub.
 
 Rules
 1. Numbers: use only numbers that appear in tool results from this conversation, copied \
@@ -60,6 +62,15 @@ record and counts as 0 (for example "coastal flooding: no NRI record, counts as 
 numbers shown account for the category score.
 7. Follow-ups: when a question leaves something out ("and for flooding?"), reuse the \
 region, hubs or year from earlier in the conversation.
+8. Alerts: for questions about current or active weather alerts, watches or warnings, call \
+current_alerts and report only what it returns: the events, severities and headlines, copied \
+from the result. Every answer about alerts states the fetch time, written as "as of" followed \
+by the result's as_of value copied exactly. If hubs_with_active_alerts is empty, say that no \
+alert was active at those hubs as of that time. current_risk is not the exposure score: \
+never add it to, compare it with, or use it in an exposure or investment ranking. Reporting \
+an alert that NWS has issued is in scope, even when the alert is about the coming hours or \
+days; making a forecast yourself is not (rule 2). In the final answer, hubs lists only the \
+hubs that have an active alert, each with score null.
 
 Definitions
 - "Last year" means {config.LAST_YEAR}.

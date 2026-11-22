@@ -1,8 +1,11 @@
-"""The five tools the LLM can call (PLAN.md §7).
+"""The six tools the LLM can call (PLAN.md §7).
 
 Each tool has:
   - an arguments model (app/schemas.py), which gives the strict JSON schema;
-  - a function that calls the scoring engine and returns a plain dict.
+  - a function that calls the scoring engine (or, for current_alerts, the alert
+    parsing in app/alerts.py) and returns a plain dict.
+
+Every tool reads only the SQLite cache. None calls an external API.
 
 The LLM never computes anything: every number it reports comes from these dicts.
 """
@@ -10,9 +13,10 @@ The LLM never computes anything: every number it reports comes from these dicts.
 import openai
 from pydantic import ValidationError
 
-from app import config, db, scoring
+from app import alerts, config, db, scoring
 from app.schemas import (
     CompareHubsArgs,
+    CurrentAlertsArgs,
     ExplainHubScoreArgs,
     ListHubsArgs,
     RankHubsArgs,
@@ -129,6 +133,42 @@ def weather_stat(conn, args: WeatherStatArgs) -> dict:
     return scoring.weather_stat(conn, args.hub_id, args.metric, args.year)
 
 
+def current_alerts(conn, args: CurrentAlertsArgs) -> dict:
+    """The NWS alerts active at each hub when the cache was last refreshed (§11).
+
+    Same parsing as the alert check (app/alerts.py), read from the cache.
+    """
+    rows = []
+    for hub in scoring.load_hubs():
+        if args.hub_ids is not None and hub["id"] not in args.hub_ids:
+            continue
+        if args.region not in (None, hub["region"]):
+            continue
+        risk = alerts.current_risk(conn, hub)
+        rows.append({
+            "hub_id": hub["id"], "city": hub["city"], "state": hub["state"], "region": hub["region"],
+            "current_risk": risk["score"],
+            "active_alerts": [
+                {"event": alert["event"], "severity": alert["severity"], "headline": alert["headline"]}
+                for alert in risk["alerts"]
+            ],
+            "nws_fetched_at": db.load_fetched_at(conn, alerts.nws.SOURCE, hub["id"]),
+        })
+    return {
+        # The oldest fetch among these hubs, so "as of" never overstates how fresh the data is.
+        "as_of": min((row["nws_fetched_at"] for row in rows), default=None),
+        "hubs_checked": len(rows),
+        "hubs_with_active_alerts": [row["hub_id"] for row in rows if row["active_alerts"]],
+        "hubs": rows,
+        "current_risk_scale": (
+            "0-100: the highest severity among a hub's active NWS alerts "
+            f"({', '.join(f'{name} = {score}' for name, score in config.NWS_SEVERITY_SCORES.items())}); "
+            "0 with no active alert. Not the exposure score."
+        ),
+        "source": "NWS active alerts at each hub's point, read from the cache (times are UTC)",
+    }
+
+
 # --- Registry: name -> (arguments model, function, description for the LLM) ------------
 
 _METRICS = "; ".join(f"{name} = {m['label']}" for name, m in config.WEATHER_METRICS.items())
@@ -148,6 +188,10 @@ TOOLS = {
     "weather_stat": (WeatherStatArgs, weather_stat,
         ("Count the days in one year at one hub that pass a weather threshold, as a number of "
         f"days and a percentage of the year. Metrics: {_METRICS}.")),
+    "current_alerts": (CurrentAlertsArgs, current_alerts,
+        ("The National Weather Service (NWS) alerts active at our hubs when the data was last "
+        "fetched (as_of), with each hub's current_risk. Use it for questions about current or "
+        "active weather alerts, watches or warnings. Not for exposure or investment rankings.")),
 }
 
 # The tool list sent to the LLM. The SDK turns each Pydantic model into a strict JSON schema.

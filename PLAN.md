@@ -113,11 +113,16 @@ How the numbers combine:
 | `compare_hubs(hub_ids, categories?)` | Side-by-side scores with breakdowns |
 | `explain_hub_score(hub_id)` | Full breakdown of one hub's score |
 | `weather_stat(hub_id, metric, year)` | e.g. % of days with snowfall in a given year |
+| `current_alerts(hub_ids?, region?)` | Bonus (§11): the NWS alerts active at each hub in the cache, with `current_risk` and the fetch time |
 
 Decided at Gate 3:
 - `rank_hubs` also accepts `category="overall"`, so "top hubs overall" questions (§10, case 8) use the same tool.
 - Tool results carry extra fields computed in code, so the LLM never compares or derives numbers: `explain_hub_score` adds the hub's rank among all hubs (overall and per category) and its categories ordered by contribution; `compare_hubs` adds `highest_per_category`.
 - Rankings sort on unrounded scores; rounding happens only in tool output. Exact ties keep `hubs.json` order.
+
+Decided at Gate 7:
+- `current_alerts` reads only the cache, with the same parsing as `app/alerts.py`. Per hub it returns `current_risk`, the active alerts (event, severity, headline) and the time of the cached NWS fetch. The chat path makes no external API calls.
+- System-prompt rules for alerts: every answer about alerts states the fetch time ("as of ..."); `current_risk` is not the exposure score and never enters an investment ranking; reporting an alert NWS has issued is in scope, while forecasting by the agent stays out of scope.
 
 **Final answer.** The LLM returns an `AgentAnswer` (a Pydantic model → JSON schema, via OpenAI structured outputs):
 - `answer`: str, the text shown to the user
@@ -147,7 +152,7 @@ FastAPI endpoints:
   - Decided at Gate 3: the agent's `trace` holds each tool's full result, so every number can be checked; the API may shorten it for display.
 - `GET /hubs`, `GET /scores?category=&region=`
 - `GET /health`
-- `POST /scores/refresh`: bonus (§11)
+- `POST /scores/refresh`: bonus (§11). Decided at Gate 7: it fetches only the NWS alerts, then recomputes both scores from the cache. Open-Meteo history and NRI don't change, so only `python -m app.refresh` fetches them.
 
 UI: one static page (`web/index.html`, plain HTML + JS) served by FastAPI. It talks only to `/chat`. It shows the answer plus a collapsible "How I got this" panel with the tools used, assumptions and confidence. One command runs everything.
 - Decided at Gate 4: the page also has four example-question buttons, a "New conversation" button, a key-figures table and any rejected attempts inside the panel, an "Out of scope" badge, and the model's `**bold**` markers rendered as bold.
@@ -158,9 +163,9 @@ UI: one static page (`web/index.html`, plain HTML + JS) served by FastAPI. It ta
 
 **Tables**
 - `api_cache(source, cache_key, fetched_at, payload_json)`
-- `score_snapshots(hub_id, computed_at, overall, breakdown_json)`
+- `score_snapshots(hub_id, computed_at, overall, breakdown_json, current_risk)`. `current_risk` was added at Gate 7 (§11); it is null in rows written before that, and an existing database gets the column automatically.
 
-The hub list and scoring config are version-controlled files (`data/hubs.json`, `app/config.py`), not DB rows. The database itself is `data/cache.db`. It's created by `python -m app.refresh` and isn't committed to git (`.gitignore`), so the README tells you to run refresh first. Chat sessions live in memory and are lost on restart; that's acceptable for a demo and stated in the README.
+The hub list and scoring config are version-controlled files (`data/hubs.json`, `app/config.py`), not DB rows. The database itself is `data/cache.db`, or the file named by the `CACHE_DB_PATH` environment variable (Gate 7; used to run the server on the simulated copy, §11). It's created by `python -m app.refresh` and isn't committed to git (`.gitignore`), so the README tells you to run refresh first. Chat sessions live in memory and are lost on restart; that's acceptable for a demo and stated in the README.
 
 **Data refresh:** `python -m app.refresh` fetches all sources into the cache, then computes and stores a score snapshot.
 
@@ -184,6 +189,7 @@ The hub list and scoring config are version-controlled files (`data/hubs.json`, 
 8. Top 3 hubs overall for investment → matches the engine's top 3.
 9. Forecast question ("Will it snow in Chicago next week?") → flagged out of scope.
 10. Chicago snow days in 2024 → the value matches the tool output.
+11. (Bonus, added at Gate 7) "Are there active weather alerts at any of our hubs right now?" → `current_alerts` is called, and the answer reports only what the tool returned.
 
 Every case also checks that the output is a valid `AgentAnswer` and that each `key_figures` value appears in a tool result.
 
@@ -192,6 +198,15 @@ Every case also checks that the output is a valid `AgentAnswer` and that each `k
 **Alert when a hub's risk changes.** The investment exposure score is meant to be stable: it changes only when the data or the weights change. That makes it the wrong signal for day-to-day alerts. The plan:
 - Add a separate `current_risk` per hub, based on NWS active alerts (alert severity mapped to 0–100).
 - `POST /scores/refresh` recomputes both scores, compares them to the last snapshot, and if a change crosses the threshold, POSTs to `ALERT_WEBHOOK_URL` (or logs it if the URL isn't set). Cron or any external scheduler can call this endpoint, which covers both the "scheduled" and "webhook-triggered" options.
+
+Decided at Gate 7:
+- **Severity mapping:** Extreme 100, Severe 75, Moderate 50, Minor 25, Unknown 0; no active alert 0. `current_risk` is the highest among the hub's active alerts. Severity is an ordered four-level scale, so even steps add no invented precision, and the worst active alert is what disrupts a hub.
+- **Thresholds:** alert when `current_risk` changes by ≥ 25 points (one severity level), or the overall exposure score by ≥ 1.0 point (ten times the 0.1 reporting precision), up or down. A hub's first `current_risk` is a baseline and doesn't alert.
+- **No filter by alert type:** every active alert counts by its severity (a README limitation).
+- **NWS-only endpoint:** `POST /scores/refresh` fetches only the NWS alerts (§8). `current_risk` is stored in a new `score_snapshots` column (§9).
+- **Scheduled check:** while the server runs, a background task started in the FastAPI lifespan runs the same NWS-only refresh right after startup and then every `ALERT_CHECK_INTERVAL_MINUTES` (`app/config.py`, default 60; 0 turns it off). It runs in a thread so chat requests aren't blocked, shares a lock with `POST /scores/refresh` so two refreshes never run at once, and a failed run is logged without stopping the next one. No new dependency.
+- **Chat:** the `current_alerts` tool (§7) answers questions about active alerts from the cache.
+- **Simulated demo:** `python -m scripts.simulate_alert` copies `data/cache.db` to `data/simulated.db`, puts one alert labeled SIMULATED into one hub's cached NWS response in the copy, and runs the compare-and-alert step on the copy. It never touches the real database, and its alert is only logged, never sent to `ALERT_WEBHOOK_URL`. `CACHE_DB_PATH=data/simulated.db ALERT_CHECK_INTERVAL_MINUTES=0 uvicorn app.main:app` starts the server on the copy; the environment variable `ALERT_CHECK_INTERVAL_MINUTES` overrides the config value for one run, here to turn the scheduled check off so it doesn't replace the simulated alert with real NWS data.
 
 **Deploy** to a public URL (e.g. Render) if time remains. **Voice:** not planned.
 
@@ -208,7 +223,8 @@ weather-risk-agent/
 ├── .gitignore           # .env, .venv/, caches, data/*.db
 ├── data/
 │   ├── hubs.json
-│   └── cache.db         # created by refresh; not in git
+│   ├── cache.db         # created by refresh; not in git
+│   └── simulated.db     # created by scripts/simulate_alert.py; not in git
 ├── app/
 │   ├── main.py          # FastAPI routes; serves the UI
 │   ├── config.py        # thresholds, caps, weights
@@ -223,6 +239,8 @@ weather-risk-agent/
 │   ├── schemas.py       # Pydantic models (tool args, AgentAnswer)
 │   ├── agent.py         # LLM loop
 │   └── alerts.py        # bonus
+├── scripts/
+│   └── simulate_alert.py   # bonus: a SIMULATED alert on a copy of the database
 ├── web/
 │   └── index.html
 ├── evals/

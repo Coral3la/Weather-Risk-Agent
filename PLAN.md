@@ -91,7 +91,11 @@ How the numbers combine:
 
 **Why snow days in the score use ≥ 1 cm, not the 0.25 cm "day with snowfall" threshold (§3).** The two answer different questions. The snowfall-% question asks whether it snowed at all. The score asks how often snow disrupts hub operations, and a thin layer that melts doesn't. 1 cm is our judgment call, not an official standard. Models may also produce many days with tiny snowfall amounts, which a higher threshold filters out; Gate 1 checks this on Denver's data before we rely on it.
 
-**NRI field choice, decided at Gate 1 after looking at real values.** Options: the hazard-type risk score (`*_RISKS`), annualized frequency (`*_AFREQ`), or the expected-annual-loss score (`*_EALS`). Leaning toward a measure of how often the hazard happens. NRI's risk scores also factor in social vulnerability and community resilience, which describe the county's population, not a hub's operations. If the chosen field isn't on a 0–100 scale, it gets a fixed cap like the weather metrics.
+**NRI field: annualized frequency (`*_AFREQ`), decided at Gate 1.** It measures how often each hazard occurs in the county, which is the closest NRI measure to "how often could this hub be disrupted". The alternatives mix in things that don't describe a hub's exposure: `*_RISKS` adds the county's social vulnerability and community resilience, and `*_EALS` depends on the value of the county's buildings, population and agriculture. Trade-offs we accept:
+- AFREQ counts how often a hazard happens, not how severe it is.
+- Units and ranges differ by hazard (across our 14 hubs, winter weather reaches ~17 per year while hurricane peaks at 0.3), so each hazard gets its own fixed cap, like the weather metrics. Caps are proposed and reviewed at Gate 2.
+- Some AFREQ values are null. For our hubs these are hazards that don't plausibly occur there: coastal flooding in inland counties, hurricanes in Denver and Minneapolis, ice storms in Phoenix, Los Angeles and Miami. A null counts as 0, and the breakdown marks it as "no NRI record".
+- NRI values cover the whole county, not the hub's point (e.g. Los Angeles County includes mountain areas with winter weather). The point-level Open-Meteo half of each category score partly offsets this.
 
 ## 7. Agent design
 
@@ -290,7 +294,7 @@ weather-risk-agent/
 **Before you start:** the NRI field type was decided at Gate 1.
 
 **Steps**
-1. **[CC]** Create `app/config.py` with every threshold (§3, §6), the cap for each weather metric, the NRI/weather split and the category weights (§14). Propose each cap value with a one-line reason.
+1. **[CC]** Create `app/config.py` with every threshold (§3, §6), the cap for each weather metric and each NRI hazard's AFREQ, the NRI/weather split and the category weights (§14). Propose each cap value with a one-line reason.
 2. **[CC]** Create `app/scoring.py` per §6: NRI part, weather part, category scores, overall score, and the full breakdown. It reads only from the cache.
 3. **[CC]** In `app/scoring.py`, add the yearly weather statistics that the Phase 3 `weather_stat` tool will use (e.g. % of days with snowfall ≥ 0.25 cm, snow days ≥ 1 cm), computed from the cached daily data.
 4. **[CC]** Extend `refresh`: after fetching, compute the scores and write one `score_snapshots` row per hub.

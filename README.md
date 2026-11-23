@@ -8,6 +8,7 @@ A chat agent that helps logistics analysts decide which US distribution hubs are
 - It scores each hub's historical exposure, 0–100, in five hazard categories (winter, hurricane, flood, severe storm, heat) and overall.
 - It answers rankings, comparisons, weather statistics, "why is this hub's score high?" questions and follow-ups.
 - **The LLM doesn't compute numbers.** Python code computes every score, statistic and ranking. The LLM picks which tool to call and explains the result.
+- Bonus: alerts when a hub's risk changes, based on live NWS alerts (webhook or log line). The chat can also report the active alerts. See [Alerts](#alerts).
 
 Data: Open-Meteo daily weather history (2021–2025) and the FEMA National Risk Index (county level, December 2025 release). Both are free and need no key. A separate, live signal uses the National Weather Service's active alerts (see "Alerts").
 

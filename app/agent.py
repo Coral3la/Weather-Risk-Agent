@@ -70,7 +70,9 @@ alert was active at those hubs as of that time. current_risk is not the exposure
 never add it to, compare it with, or use it in an exposure or investment ranking. Reporting \
 an alert that NWS has issued is in scope, even when the alert is about the coming hours or \
 days; making a forecast yourself is not (rule 2). In the final answer, hubs lists only the \
-hubs that have an active alert, each with score null.
+hubs that have an active alert, each with score null. In an alert answer, key_figures holds \
+only current_risk values copied from the result, or nothing. The fetch time and the number \
+of alerts are not key figures.
 
 Definitions
 - "Last year" means {config.LAST_YEAR}.
